@@ -571,21 +571,51 @@
   }
 
   let scrubbing = false;
-  function seekFromPointer(e){
+  let pendingFrac = null;
+  let seekInFlight = false;
+  let moveScheduled = false;
+  let lastPointerEvent = null;
+
+  function fracFromEvent(e){
     const rect = filmstripWrap.getBoundingClientRect();
     const x = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
-    const frac = rect.width ? x / rect.width : 0;
-    player.pause();
+    return rect.width ? x / rect.width : 0;
+  }
+
+  function requestSeek(frac){
+    playheadEl.style.left = (frac*100) + '%'; // retour visuel immédiat, pas d'attente du décodage
+    pendingFrac = frac;
+    if(!seekInFlight) performPendingSeek();
+  }
+  function performPendingSeek(){
+    if(pendingFrac === null) return;
+    seekInFlight = true;
+    const frac = pendingFrac;
+    pendingFrac = null;
     player.currentTime = frac * (player.duration || 0);
   }
+  player.addEventListener('seeked', ()=>{
+    seekInFlight = false;
+    if(pendingFrac !== null) performPendingSeek(); // on saute direct à la position la plus récente demandée
+  });
+
   filmstripWrap.addEventListener('pointerdown', (e)=>{
     scrubbing = true;
     filmstripWrap.style.cursor = 'grabbing';
     try{ filmstripWrap.setPointerCapture(e.pointerId); }catch(err){}
-    seekFromPointer(e);
+    player.pause();
+    requestSeek(fracFromEvent(e));
   });
   filmstripWrap.addEventListener('pointermove', (e)=>{
-    if(scrubbing) seekFromPointer(e);
+    if(!scrubbing) return;
+    lastPointerEvent = e;
+    if(!moveScheduled){
+      moveScheduled = true;
+      requestAnimationFrame(()=>{
+        moveScheduled = false;
+        if(scrubbing && lastPointerEvent) requestSeek(fracFromEvent(lastPointerEvent));
+      });
+    }
   });
   ['pointerup','pointercancel','pointerleave'].forEach(evt=>{
     filmstripWrap.addEventListener(evt, ()=>{ scrubbing = false; filmstripWrap.style.cursor = 'grab'; });
