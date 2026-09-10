@@ -280,9 +280,10 @@
         <button id="nextFrame" aria-label="Frame suivante">▶</button>
       </div>
       <div id="precisionNote" style="text-align:center; font-size:11px; color:var(--text-muted); margin-top:6px;"></div>
+      <div id="fpsNote" style="text-align:center; font-size:11.5px; color:var(--accent-2); margin-top:4px;"></div>
       <div class="row" style="margin-top:10px;">
         <div class="field">
-          <label for="fpsSelect">Cadence estimée de la vidéo</label>
+          <label for="fpsSelect">Cadence manuelle (si la détection échoue)</label>
           <select id="fpsSelect">
             <option value="30">30 fps (normal)</option>
             <option value="60">60 fps</option>
@@ -511,7 +512,45 @@
     reader.readAsDataURL(file);
   }
 
-  function frameStep(){ return 1 / parseInt(fpsSelect.value, 10); }
+  function frameStep(){ return detectedFrameDuration || (1 / parseInt(fpsSelect.value, 10)); }
+
+  let detectedFrameDuration = null;
+  const fpsNote = document.getElementById('fpsNote');
+
+  fpsSelect.addEventListener('change', ()=>{
+    detectedFrameDuration = null; // l'utilisateur reprend la main manuellement
+    fpsNote.textContent = 'Cadence manuelle : ' + fpsSelect.value + ' fps (détection auto désactivée pour cette vidéo).';
+    fpsNote.style.color = 'var(--text-muted)';
+  });
+
+  function autoDetectFrameDuration(callback){
+    if(!supportsRVFC){ callback(null); return; }
+    const times = [];
+    const maxSamples = 10;
+    function onFrame(now, metadata){
+      times.push(metadata.mediaTime);
+      if(times.length < maxSamples && !player.paused){
+        player.requestVideoFrameCallback(onFrame);
+      } else {
+        player.pause();
+        const deltas = [];
+        for(let i=1;i<times.length;i++){
+          const d = times[i]-times[i-1];
+          if(d > 0.001) deltas.push(d);
+        }
+        if(deltas.length === 0){ callback(null); return; }
+        deltas.sort((a,b)=>a-b);
+        callback(deltas[Math.floor(deltas.length/2)]); // médiane, robuste aux valeurs aberrantes
+      }
+    }
+    player.currentTime = 0;
+    const playPromise = player.play();
+    if(playPromise && playPromise.then){
+      playPromise.then(()=>{ player.requestVideoFrameCallback(onFrame); }).catch(()=>callback(null));
+    } else {
+      player.requestVideoFrameCallback(onFrame);
+    }
+  }
 
   /* ---------- filmstrip scrubber ---------- */
   const filmstripWrap = document.getElementById('filmstripWrap');
@@ -640,7 +679,22 @@
 
   player.addEventListener('loadedmetadata', ()=>{
     player.currentTime = 0;
-    generateFilmstrip();
+    detectedFrameDuration = null;
+    fpsNote.textContent = 'Détection de la cadence réelle de la vidéo…';
+    fpsNote.style.color = 'var(--accent-2)';
+    autoDetectFrameDuration((frameDur)=>{
+      if(frameDur){
+        detectedFrameDuration = frameDur;
+        const fps = 1/frameDur;
+        fpsNote.textContent = 'Cadence détectée : ' + fps.toFixed(1) + ' fps — pas de ' + (frameDur*1000).toFixed(1) + ' ms par frame';
+        fpsNote.style.color = 'var(--good)';
+      } else {
+        fpsNote.textContent = 'Détection impossible sur ce navigateur — cadence manuelle utilisée (' + fpsSelect.value + ' fps).';
+        fpsNote.style.color = 'var(--text-muted)';
+      }
+      player.currentTime = 0;
+      generateFilmstrip();
+    });
   });
   player.addEventListener('seeked', refineTimeAndUpdateUI);
   player.addEventListener('seeked', updatePlayheadFromTime);
