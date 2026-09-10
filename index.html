@@ -728,14 +728,60 @@
   playpauseBtn.addEventListener('click', ()=>{
     if(player.paused){ player.play(); } else { player.pause(); }
   });
-  document.getElementById('nextFrame').addEventListener('click', ()=>{
+  function stepForwardOneFrame(){
+    if(!supportsRVFC){
+      player.currentTime = Math.min(player.duration || 0, player.currentTime + frameStep());
+      return;
+    }
+    const startTime = lastKnownTime;
+    let guard = 0;
+    function onFrame(now, metadata){
+      guard++;
+      if(metadata.mediaTime > startTime + 0.0005 || guard > 30){
+        player.pause();
+        lastKnownTime = metadata.mediaTime;
+        timecode.textContent = lastKnownTime.toFixed(3) + 's';
+        updatePlayheadFromTime();
+        return;
+      }
+      player.requestVideoFrameCallback(onFrame);
+    }
+    player.requestVideoFrameCallback(onFrame);
+    player.play();
+  }
+
+  function stepBackwardOneFrame(){
+    const step = frameStep();
+    if(!supportsRVFC){
+      player.currentTime = Math.max(0, player.currentTime - step);
+      return;
+    }
+    const target = Math.max(0, lastKnownTime - step);
+    const seekTo = Math.max(0, target - step * 1.5);
     player.pause();
-    player.currentTime = Math.min(player.duration || 0, player.currentTime + frameStep());
-  });
-  document.getElementById('prevFrame').addEventListener('click', ()=>{
-    player.pause();
-    player.currentTime = Math.max(0, player.currentTime - frameStep());
-  });
+    player.currentTime = seekTo;
+    player.addEventListener('seeked', function onSeekedOnce(){
+      player.removeEventListener('seeked', onSeekedOnce);
+      let lastGood = null;
+      let guard = 0;
+      function onFrame(now, metadata){
+        guard++;
+        if(metadata.mediaTime <= target + 0.0005 && guard < 30){
+          lastGood = metadata.mediaTime;
+          player.requestVideoFrameCallback(onFrame);
+        } else {
+          player.pause();
+          const finalTime = lastGood !== null ? lastGood : metadata.mediaTime;
+          player.currentTime = finalTime;
+        }
+      }
+      player.requestVideoFrameCallback(onFrame);
+      player.play();
+    });
+  }
+
+  document.getElementById('nextFrame').addEventListener('click', stepForwardOneFrame);
+  document.getElementById('prevFrame').addEventListener('click', stepBackwardOneFrame);
 
   function updateMarkPills(){
     const pt = document.getElementById('pillTakeoff');
