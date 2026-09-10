@@ -674,14 +674,61 @@
   playpauseBtn.addEventListener('click', ()=>{
     if(player.paused){ player.play(); } else { player.pause(); }
   });
-  document.getElementById('nextFrame').addEventListener('click', ()=>{
+  function seekAndGetMediaTime(time, cb){
+    const clamped = Math.max(0, Math.min(player.duration || 0, time));
+    function onSeeked(){
+      player.removeEventListener('seeked', onSeeked);
+      if(supportsRVFC){
+        player.requestVideoFrameCallback((now, metadata)=>{ cb(metadata.mediaTime); });
+      } else {
+        cb(player.currentTime);
+      }
+    }
+    player.addEventListener('seeked', onSeeked);
+    player.currentTime = clamped;
+  }
+
+  function finalizeStep(mt){
+    lastKnownTime = mt;
+    timecode.textContent = mt.toFixed(3) + 's';
+    updatePlayheadFromTime();
+  }
+
+  const PROBE = 0.001; // 1 ms — plus petit que n'importe quel écart réel entre frames
+  const MAX_PROBES = 80;
+
+  function stepForwardOneFrame(){
     player.pause();
-    player.currentTime = Math.min(player.duration || 0, player.currentTime + frameStep());
-  });
-  document.getElementById('prevFrame').addEventListener('click', ()=>{
+    const start = lastKnownTime;
+    let probes = 0;
+    function tryNext(t){
+      probes++;
+      if(t > (player.duration || 0) || probes > MAX_PROBES){ finalizeStep(player.currentTime); return; }
+      seekAndGetMediaTime(t, (mt)=>{
+        if(mt > start + 0.0004){ finalizeStep(mt); }
+        else { tryNext(t + PROBE); }
+      });
+    }
+    tryNext(start + PROBE);
+  }
+
+  function stepBackwardOneFrame(){
     player.pause();
-    player.currentTime = Math.max(0, player.currentTime - frameStep());
-  });
+    const start = lastKnownTime;
+    let probes = 0;
+    function tryPrev(t){
+      probes++;
+      if(t < 0 || probes > MAX_PROBES){ finalizeStep(Math.max(0, player.currentTime)); return; }
+      seekAndGetMediaTime(t, (mt)=>{
+        if(mt < start - 0.0004){ finalizeStep(mt); }
+        else { tryPrev(t - PROBE); }
+      });
+    }
+    tryPrev(start - PROBE);
+  }
+
+  document.getElementById('nextFrame').addEventListener('click', stepForwardOneFrame);
+  document.getElementById('prevFrame').addEventListener('click', stepBackwardOneFrame);
 
   function updateMarkPills(){
     const pt = document.getElementById('pillTakeoff');
