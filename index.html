@@ -1020,9 +1020,9 @@
       { name:'SJ', color:'#8A93A3', data: series('SJ') },
       { name:'CMJ bras', color:'#4CC9F0', data: series('CMJ') },
       { name:'SAJ', color:'#FF6B35', data: series('SAJ') },
-      { name:'Touché SAJ', color:'#5FD68C', dash:true, data: series('SAJ','touch') },
+      { name:'Touché SAJ', color:'#5FD68C', dash:true, data: series('SAJ','touch'), axis:'r' },
     ];
-    drawLineChart('jumpChart', 'jumpChartLegend', { labels: dates, series: datasets, unitLeft:'cm' });
+    drawLineChart('jumpChart', 'jumpChartLegend', { labels: dates, series: datasets, unitLeft:'cm saut', unitRight:'cm touché' });
   }
 
   /* ---------- mensurations ---------- */
