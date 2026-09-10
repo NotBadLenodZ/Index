@@ -282,15 +282,28 @@
       <div id="precisionNote" style="text-align:center; font-size:11px; color:var(--text-muted); margin-top:6px;"></div>
       <div class="row" style="margin-top:10px;">
         <div class="field">
-          <label for="fpsSelect">Cadence à laquelle tu as filmé (regarde dans ton appli caméra)</label>
+          <label for="fpsSelect">Cadence du fichier (pour naviguer frame par frame)</label>
           <select id="fpsSelect">
-            <option value="30">30 fps (normal)</option>
+            <option value="24">24 fps</option>
+            <option value="25">25 fps</option>
+            <option value="30" selected>30 fps (le plus courant pour les exports ralentis)</option>
             <option value="60">60 fps</option>
-            <option value="120">120 fps (slow-mo)</option>
-            <option value="240" selected>240 fps (slow-mo)</option>
           </select>
         </div>
       </div>
+      <div class="row">
+        <div class="field">
+          <label for="slowdownSelect">Vitesse de ralenti utilisée à la capture</label>
+          <select id="slowdownSelect">
+            <option value="1">Pas de ralenti (vitesse normale)</option>
+            <option value="2">2× plus lent</option>
+            <option value="4">4× plus lent</option>
+            <option value="8" selected>8× plus lent (ex: 240fps → fichier à 30fps)</option>
+            <option value="16">16× plus lent</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint" style="margin-top:6px;">Si ton téléphone affiche une vitesse de ralenti (x0,125, x0,25...) dans l'appli caméra, prends l'inverse : x0,125 → 8× plus lent.</p>
       <button class="btn btn-ghost btn-block" id="autoDetect" style="margin-top:12px;">Suggérer les frames automatiquement</button>
       <div class="badge-auto" id="autoBadge" style="display:none;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4CC9F0" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9 12l2 2 4-4"/></svg>
@@ -305,10 +318,11 @@
         <div class="pill" id="pillLanding">Atterrissage —</div>
       </div>
 
+      <div id="videoTimeNote" style="text-align:center; font-size:11.5px; color:var(--text-muted); margin-top:12px;"></div>
       <div class="result" id="resultBlock" style="display:none;">
         <div class="item">
           <div class="v" id="flightTime">—</div>
-          <div class="l">Temps de vol (s)</div>
+          <div class="l">Temps de vol réel (s)</div>
         </div>
         <div class="item">
           <div class="v" id="jumpHeight">—</div>
@@ -703,16 +717,27 @@
     renderResult();
   });
 
+  const slowdownSelect = document.getElementById('slowdownSelect');
+  function getSlowdownFactor(){ return parseFloat(slowdownSelect.value) || 1; }
+  slowdownSelect.addEventListener('change', renderResult);
+
   function renderResult(){
     const box = document.getElementById('resultBlock');
     const saveBtn = document.getElementById('saveJump');
+    const note = document.getElementById('videoTimeNote');
     if(markIn === null || markOut === null || markOut <= markIn){
       box.style.display = 'none';
+      note.textContent = '';
       saveBtn.disabled = true;
       return;
     }
-    const t = markOut - markIn;
+    const videoT = markOut - markIn;
+    const slowdown = getSlowdownFactor();
+    const t = videoT / slowdown; // temps réel
     const h = (G * t * t) / 8; // cm
+    note.textContent = slowdown > 1
+      ? 'Temps mesuré dans la vidéo : ' + videoT.toFixed(3) + 's ÷ ' + slowdown + ' = ' + t.toFixed(3) + 's réel'
+      : '';
     document.getElementById('flightTime').textContent = t.toFixed(3);
     document.getElementById('jumpHeight').textContent = h.toFixed(1);
     if(currentType === 'SAJ'){
@@ -724,7 +749,8 @@
   }
 
   document.getElementById('saveJump').addEventListener('click', ()=>{
-    const t = markOut - markIn;
+    const videoT = markOut - markIn;
+    const t = videoT / getSlowdownFactor();
     const h = (G * t * t) / 8;
     const entry = {
       id: Date.now(),
