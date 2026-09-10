@@ -280,15 +280,14 @@
         <button id="nextFrame" aria-label="Frame suivante">▶</button>
       </div>
       <div id="precisionNote" style="text-align:center; font-size:11px; color:var(--text-muted); margin-top:6px;"></div>
-      <div id="fpsNote" style="text-align:center; font-size:11.5px; color:var(--accent-2); margin-top:4px;"></div>
       <div class="row" style="margin-top:10px;">
         <div class="field">
-          <label for="fpsSelect">Cadence manuelle (si la détection échoue)</label>
+          <label for="fpsSelect">Cadence à laquelle tu as filmé (regarde dans ton appli caméra)</label>
           <select id="fpsSelect">
             <option value="30">30 fps (normal)</option>
             <option value="60">60 fps</option>
-            <option value="120" selected>120 fps (slow-mo)</option>
-            <option value="240">240 fps (slow-mo)</option>
+            <option value="120">120 fps (slow-mo)</option>
+            <option value="240" selected>240 fps (slow-mo)</option>
           </select>
         </div>
       </div>
@@ -512,45 +511,7 @@
     reader.readAsDataURL(file);
   }
 
-  function frameStep(){ return detectedFrameDuration || (1 / parseInt(fpsSelect.value, 10)); }
-
-  let detectedFrameDuration = null;
-  const fpsNote = document.getElementById('fpsNote');
-
-  fpsSelect.addEventListener('change', ()=>{
-    detectedFrameDuration = null; // l'utilisateur reprend la main manuellement
-    fpsNote.textContent = 'Cadence manuelle : ' + fpsSelect.value + ' fps (détection auto désactivée pour cette vidéo).';
-    fpsNote.style.color = 'var(--text-muted)';
-  });
-
-  function autoDetectFrameDuration(callback){
-    if(!supportsRVFC){ callback(null); return; }
-    const times = [];
-    const maxSamples = 10;
-    function onFrame(now, metadata){
-      times.push(metadata.mediaTime);
-      if(times.length < maxSamples && !player.paused){
-        player.requestVideoFrameCallback(onFrame);
-      } else {
-        player.pause();
-        const deltas = [];
-        for(let i=1;i<times.length;i++){
-          const d = times[i]-times[i-1];
-          if(d > 0.001) deltas.push(d);
-        }
-        if(deltas.length === 0){ callback(null); return; }
-        deltas.sort((a,b)=>a-b);
-        callback(deltas[Math.floor(deltas.length/2)]); // médiane, robuste aux valeurs aberrantes
-      }
-    }
-    player.currentTime = 0;
-    const playPromise = player.play();
-    if(playPromise && playPromise.then){
-      playPromise.then(()=>{ player.requestVideoFrameCallback(onFrame); }).catch(()=>callback(null));
-    } else {
-      player.requestVideoFrameCallback(onFrame);
-    }
-  }
+  function frameStep(){ return 1 / parseInt(fpsSelect.value, 10); }
 
   /* ---------- filmstrip scrubber ---------- */
   const filmstripWrap = document.getElementById('filmstripWrap');
@@ -679,22 +640,7 @@
 
   player.addEventListener('loadedmetadata', ()=>{
     player.currentTime = 0;
-    detectedFrameDuration = null;
-    fpsNote.textContent = 'Détection de la cadence réelle de la vidéo…';
-    fpsNote.style.color = 'var(--accent-2)';
-    autoDetectFrameDuration((frameDur)=>{
-      if(frameDur){
-        detectedFrameDuration = frameDur;
-        const fps = 1/frameDur;
-        fpsNote.textContent = 'Cadence détectée : ' + fps.toFixed(1) + ' fps — pas de ' + (frameDur*1000).toFixed(1) + ' ms par frame';
-        fpsNote.style.color = 'var(--good)';
-      } else {
-        fpsNote.textContent = 'Détection impossible sur ce navigateur — cadence manuelle utilisée (' + fpsSelect.value + ' fps).';
-        fpsNote.style.color = 'var(--text-muted)';
-      }
-      player.currentTime = 0;
-      generateFilmstrip();
-    });
+    generateFilmstrip();
   });
   player.addEventListener('seeked', refineTimeAndUpdateUI);
   player.addEventListener('seeked', updatePlayheadFromTime);
@@ -728,60 +674,14 @@
   playpauseBtn.addEventListener('click', ()=>{
     if(player.paused){ player.play(); } else { player.pause(); }
   });
-  function stepForwardOneFrame(){
-    if(!supportsRVFC){
-      player.currentTime = Math.min(player.duration || 0, player.currentTime + frameStep());
-      return;
-    }
-    const startTime = lastKnownTime;
-    let guard = 0;
-    function onFrame(now, metadata){
-      guard++;
-      if(metadata.mediaTime > startTime + 0.0005 || guard > 30){
-        player.pause();
-        lastKnownTime = metadata.mediaTime;
-        timecode.textContent = lastKnownTime.toFixed(3) + 's';
-        updatePlayheadFromTime();
-        return;
-      }
-      player.requestVideoFrameCallback(onFrame);
-    }
-    player.requestVideoFrameCallback(onFrame);
-    player.play();
-  }
-
-  function stepBackwardOneFrame(){
-    const step = frameStep();
-    if(!supportsRVFC){
-      player.currentTime = Math.max(0, player.currentTime - step);
-      return;
-    }
-    const target = Math.max(0, lastKnownTime - step);
-    const seekTo = Math.max(0, target - step * 1.5);
+  document.getElementById('nextFrame').addEventListener('click', ()=>{
     player.pause();
-    player.currentTime = seekTo;
-    player.addEventListener('seeked', function onSeekedOnce(){
-      player.removeEventListener('seeked', onSeekedOnce);
-      let lastGood = null;
-      let guard = 0;
-      function onFrame(now, metadata){
-        guard++;
-        if(metadata.mediaTime <= target + 0.0005 && guard < 30){
-          lastGood = metadata.mediaTime;
-          player.requestVideoFrameCallback(onFrame);
-        } else {
-          player.pause();
-          const finalTime = lastGood !== null ? lastGood : metadata.mediaTime;
-          player.currentTime = finalTime;
-        }
-      }
-      player.requestVideoFrameCallback(onFrame);
-      player.play();
-    });
-  }
-
-  document.getElementById('nextFrame').addEventListener('click', stepForwardOneFrame);
-  document.getElementById('prevFrame').addEventListener('click', stepBackwardOneFrame);
+    player.currentTime = Math.min(player.duration || 0, player.currentTime + frameStep());
+  });
+  document.getElementById('prevFrame').addEventListener('click', ()=>{
+    player.pause();
+    player.currentTime = Math.max(0, player.currentTime - frameStep());
+  });
 
   function updateMarkPills(){
     const pt = document.getElementById('pillTakeoff');
